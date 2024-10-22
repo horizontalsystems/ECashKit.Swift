@@ -64,25 +64,9 @@ public class Kit: AbstractKit {
         let storage = GrdbStorage(databaseFilePath: databaseFilePath)
         let apiSyncStateManager = ApiSyncStateManager(storage: storage, restoreFromApi: network.syncableFromApi && syncMode != BitcoinCore.SyncMode.full)
 
-        let apiTransactionProvider: IApiTransactionProvider
-        switch networkType {
-        case .mainNet:
-            let apiTransactionProviderUrl = "https://chronik.fabien.cash/"
-
-            if case .blockchair = syncMode {
-                let blockchairApi = BlockchairApi(chainId: network.blockchairChainId, logger: logger)
-                let blockchairBlockHashFetcher = BlockchairBlockHashFetcher(blockchairApi: blockchairApi)
-                let blockchairProvider = BlockchairTransactionProvider(blockchairApi: blockchairApi, blockHashFetcher: blockchairBlockHashFetcher)
-                let chronikApiProvider = ChronikApi(url: apiTransactionProviderUrl, logger: logger)
-
-                apiTransactionProvider = BiApiBlockProvider(restoreProvider: chronikApiProvider, syncProvider: blockchairProvider, apiSyncStateManager: apiSyncStateManager)
-            } else {
-                apiTransactionProvider = ChronikApi(url: apiTransactionProviderUrl, logger: logger)
-            }
-
-        case .testNet:
-            apiTransactionProvider = ChronikApi(url: "", logger: logger)
-        }
+        let blockchairApi = BlockchairApi(chainId: network.blockchairChainId, logger: logger)
+        let blockchairBlockHashFetcher = BlockchairBlockHashFetcher(blockchairApi: blockchairApi)
+        let apiTransactionProvider: IApiTransactionProvider = BlockchairTransactionProvider(blockchairApi: blockchairApi, blockHashFetcher: blockchairBlockHashFetcher)
 
         let paymentAddressParser = PaymentAddressParser(validScheme: validScheme, removeScheme: false)
         let difficultyEncoder = DifficultyEncoder()
@@ -111,7 +95,10 @@ public class Kit: AbstractKit {
 
         blockValidatorSet.add(blockValidator: blockValidatorChain)
 
-        let bitcoinCore = try BitcoinCoreBuilder(logger: logger)
+        let purpose: Purpose = .bip44
+        let builder = BitcoinCoreBuilder(logger: logger)
+
+        let bitcoinCore = try builder
             .set(network: network)
             .set(apiTransactionProvider: apiTransactionProvider)
             .set(checkpoint: Checkpoint.resolveCheckpoint(network: network, syncMode: syncMode, storage: storage))
@@ -122,7 +109,7 @@ public class Kit: AbstractKit {
             .set(walletId: walletId)
             .set(confirmationsThreshold: confirmationsThreshold)
             .set(peerSize: 10)
-            .set(purpose: .bip44)
+            .set(purpose: purpose)
             .set(syncMode: syncMode)
             .set(storage: storage)
             .set(blockValidator: blockValidatorSet)
@@ -130,7 +117,7 @@ public class Kit: AbstractKit {
 
         super.init(bitcoinCore: bitcoinCore, network: network)
 
-        bitcoinCore.add(restoreKeyConverter: ECashRestoreKeyConverter())
+        bitcoinCore.add(restoreKeyConverter: ECashRestoreKeyConverter(addressConverter: builder.addressConverter, purpose: purpose))
     }
 
     public convenience init(seed: Data, walletId: String, syncMode: BitcoinCore.SyncMode = .api, networkType: NetworkType = .mainNet, confirmationsThreshold: Int = 6, logger: Logger?) throws {
